@@ -42,6 +42,7 @@ For devices with a Battery entity, an offline device reports 0% so it appears in
 | Manipulator | Valve, Sensor | Open/closed control, battery | YS4909-UC
 | MotionSensor | Binary Sensor | Motion detected, battery | YS7804-UC
 | Outlet | Switch, Sensor | On/off state, power | YS6614-UC
+| SmartRemoter | Event, Device triggers, Sensor | Button short/long press, battery | YS3614-UC
 | TempSensor | Sensor | Temperature, battery | YS8004-UC
 | THSensor | Sensor | Temperature, humidity, battery | YS8003-UC, YS8005-UC, YS8007-UC
 | TiltSensor | Binary Sensor | Open/closed state, battery | YS7706-UC
@@ -76,6 +77,23 @@ GarageDoor controllers only pulse the opener's relay and report no door position
 WaterMeterController meter and usage readings are shown in liters. Recent usage duration is shown in minutes.
 
 The THSensor `Continuous alert interval` diagnostic (previously named `Reporting interval`) controls repeated alerts. The separate `Record interval` diagnostic shows the configured sampling interval, in minutes, when the device supplies it. Existing alert-interval entity IDs are preserved.
+
+## SmartRemoter (FlexFob) buttons
+
+As with the YoLink cloud integration, button presses are exposed as device triggers and as a bus event:
+
+- **Device triggers**: in the automation editor, choose Add trigger, then By type, then Device, then the remote, and a trigger such as `Button 1 short press` or `Button 2 long press`. The Mini FlexFob (YS3614) offers buttons 1-2, and other remotes offer buttons 1-4. On the Mini FlexFob, button 1 is the top button.
+- **Bus event**: each press fires `yolocal_event` with `device_id` (the Home Assistant device id), `type` (for example `button_1_short_press`) and `yolink_device_id`. This mirrors the cloud integration's `yolink_event`.
+
+In addition, this integration adds Home Assistant event entities, which the cloud integration does not have:
+
+- **Event entities**: each button is an event entity (for example `event.fob_button_1`) with event types `short_press` and `long_press`. These appear when you add a trigger By target and work with the Event received trigger. They ignore the 12-hour contact timeout and only become unavailable when the hub is unreachable, so the first press after a long silence is never ignored.
+
+A press is a command rather than a state, so:
+
+- Only `SmartRemoter.StatusChange` MQTT reports fire events. The remote also checks in about every four hours with a `SmartRemoter.Report` that repeats its last press, and `getState` always returns the last press. Neither fires an event.
+- A press that reaches Home Assistant more than 60 seconds after the hub stamped it is dropped and logged, instead of being acted on late.
+- A press delivered by both hub interfaces, or replayed after a reconnect or restart, fires only once.
 
 ## Prerequisites
 
@@ -189,6 +207,7 @@ The `tests/` folder includes standalone test and diagnostics scripts that are no
   - `tests/wait_for_tilt.sh`
   - `tests/wait_for_leak.sh`
   - `tests/wait_for_lock.sh`
+  - `tests/wait_for_button.sh` (SmartRemoter presses, with hub-to-local timing)
   - `tests/wait_for_any.sh` (generic, device-type agnostic)
   - `tests/list_yolink_devices.py`
   - `tests/list_yolink_device_types.py`
@@ -215,6 +234,7 @@ Required device serials for full live type coverage:
 - `YOLINK_TEMP_8004_SERIAL`
 - `YOLINK_TILT_7706_SERIAL`
 - `YOLINK_LOCK_MODEL_NUMBER_SERIAL`
+- `YOLINK_REMOTE_3614_SERIAL` (or `YOLINK_REMOTE_3604_SERIAL`)
 
 Optional:
 
@@ -236,6 +256,7 @@ export YOLINK_LEAK_7903_SERIAL=
 export YOLINK_TEMP_8004_SERIAL=
 export YOLINK_TILT_7706_SERIAL=
 export YOLINK_LOCK_MODEL_NUMBER_SERIAL=
+export YOLINK_REMOTE_3614_SERIAL=
 ```
 
 ### Run Test Scripts
@@ -256,6 +277,12 @@ Wait for TH unit change:
 
 ```bash
 ./tests/wait_for_th.sh --field unit --timeout 120
+```
+
+Wait for a SmartRemoter button press:
+
+```bash
+./tests/wait_for_button.sh --timeout 120
 ```
 
 Capture payloads for configured devices:

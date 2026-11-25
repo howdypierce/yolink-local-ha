@@ -33,6 +33,7 @@ from .api import (
 from .const import (
     DEVICE_DISCOVERY_INTERVAL,
     DOMAIN,
+    EVENT_BUTTON,
     EVENT_DATA_RECORD,
     UPDATE_INTERVAL,
 )
@@ -42,6 +43,15 @@ type DeviceRegistryListener = Callable[[list[Device], list[Device]], None]
 TRANSIENT_DEVICE_UNREACHABLE = "000201"
 STALE_REPORT_AGE = timedelta(hours=12)
 MQTT_EVENT_MAX_DELAY = timedelta(minutes=30)
+# A button press is a command, not a state, so a late one is dropped rather than
+# acted on. The bound only absorbs clock skew between the hub and Home Assistant.
+BUTTON_EVENT_MAX_AGE = timedelta(seconds=60)
+# Only a status change is a press. getState and other report types replay the
+# last press, which must never be mistaken for a new one.
+SMART_REMOTER_PRESS_EVENTS = frozenset({"SmartRemoter.StatusChange"})
+SMART_REMOTER_PRESS_TYPES = {"Press": "short_press", "LongPress": "long_press"}
+# The local API documents keyMask bits 0-7 as keys 0-7.
+SMART_REMOTER_MAX_KEYS = 8
 SET_STATE_TRANSPORT_RETRY_DELAY = 2.0
 DEVICE_DISCOVERY_MIN_SPACING = timedelta(seconds=10)
 HUB_HEALTH_FAILURE_THRESHOLD = 2
@@ -181,6 +191,33 @@ def _diagnostic_online(value: Any) -> str:
     if value is False:
         return "False"
     return "<missing>" if value is None else "<invalid>"
+
+
+def smart_remoter_trigger_types(event_data: dict[str, Any]) -> list[str]:
+    """Translate a SmartRemoter event into cloud-integration trigger types.
+
+    keyMask bit 0 is button 1, so ``{"keyMask": 2, "type": "Press"}`` becomes
+    ``["button_2_short_press"]``. A mask with several bits set yields one
+    trigger type per button. Unknown press types and malformed payloads yield
+    nothing.
+    """
+    press = event_data.get("event")
+    if not isinstance(press, dict):
+        return []
+    press_type = SMART_REMOTER_PRESS_TYPES.get(press.get("type"))
+    key_mask = press.get("keyMask")
+    if (
+        press_type is None
+        or not isinstance(key_mask, int)
+        or isinstance(key_mask, bool)
+        or key_mask <= 0
+    ):
+        return []
+    return [
+        f"button_{bit + 1}_{press_type}"
+        for bit in range(SMART_REMOTER_MAX_KEYS)
+        if key_mask & (1 << bit)
+    ]
 
 
 def _went_offline(previous: dict[str, Any], current: dict[str, Any]) -> bool:
@@ -1105,6 +1142,10 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if device.device_type == "THSensor" and event.event == "THSensor.DataRecord":
             self._on_thsensor_data_record(event)
             return
+        if device.device_type == "SmartRemoter":
+            # A press also carries battery and firmware, so the state merge
+            # below still runs.
+            self._fire_smart_remoter_events(event)
 
         event_data = event.data if isinstance(event.data, dict) else {}
         normalized_event = self._normalize_mqtt_event(device, event_data)
@@ -1218,6 +1259,52 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             EVENT_DATA_RECORD,
             {"device_id": event.device_id, "records": valid_records},
         )
+
+    def _fire_smart_remoter_events(self, event: DeviceEvent) -> None:
+        """Fire one button event per pressed key of a new, timely press.
+
+        Duplicate, replayed and badly delayed packets were already rejected by
+        the caller, so each physical press fires at most once.
+        """
+        if event.event not in SMART_REMOTER_PRESS_EVENTS:
+            return
+        trigger_types = smart_remoter_trigger_types(event.data)
+        if not trigger_types:
+            _LOGGER.debug(
+                "Ignoring SmartRemoter event without a known press for %s: %s",
+                event.device_id,
+                event.data.get("event"),
+            )
+            return
+        event_time = self._mqtt_event_timestamp(event)
+        if event_time is not None:
+            age = dt_util.utcnow() - event_time
+            if age > BUTTON_EVENT_MAX_AGE:
+                _LOGGER.info(
+                    "Dropping SmartRemoter press for %s received %.0f s late: %s",
+                    event.device_id,
+                    age.total_seconds(),
+                    ", ".join(trigger_types),
+                )
+                return
+        device_entry = dr.async_get(self.hass).async_get_device(
+            identifiers={(DOMAIN, event.device_id)}
+        )
+        if device_entry is None:
+            _LOGGER.debug(
+                "Ignoring SmartRemoter press for unregistered device %s",
+                event.device_id,
+            )
+            return
+        for trigger_type in trigger_types:
+            self.hass.bus.async_fire(
+                EVENT_BUTTON,
+                {
+                    "device_id": device_entry.id,
+                    "type": trigger_type,
+                    "yolink_device_id": event.device_id,
+                },
+            )
 
     def _mqtt_event_timestamp(self, event: DeviceEvent) -> datetime | None:
         """Read the transport clock for ordering, independently of radio contact."""

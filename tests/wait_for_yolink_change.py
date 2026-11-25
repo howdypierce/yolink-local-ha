@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +79,21 @@ def extract_motion(state: dict[str, Any]) -> str | None:
     if isinstance(nested, str):
         return nested
     return None
+
+
+PRESS_TYPES = {"Press": "short_press", "LongPress": "long_press"}
+
+
+def describe_press(press: Any) -> str:
+    """Describe a SmartRemoter event the way the integration names triggers."""
+    if not isinstance(press, dict):
+        return f"no press ({press!r})"
+    key_mask = press.get("keyMask")
+    press_type = PRESS_TYPES.get(press.get("type"), f"unknown type {press.get('type')!r}")
+    if not isinstance(key_mask, int) or isinstance(key_mask, bool) or key_mask <= 0:
+        return f"invalid keyMask {key_mask!r} ({press_type})"
+    buttons = [f"button_{bit + 1}" for bit in range(8) if key_mask & (1 << bit)]
+    return f"{' + '.join(buttons)} {press_type} (keyMask={key_mask})"
 
 
 def diff_states(old: dict[str, Any], new: dict[str, Any]) -> list[str]:
@@ -175,6 +191,13 @@ def get_device_defaults(kind: str) -> tuple[str, str]:
         )
     if kind == "lock":
         return (os.getenv("YOLINK_LOCK_MODEL_NUMBER_SERIAL") or "", "")
+    if kind == "button":
+        return (
+            os.getenv("YOLINK_REMOTE_3614_SERIAL")
+            or os.getenv("YOLINK_REMOTE_3604_SERIAL")
+            or "",
+            os.getenv("YOLINK_REMOTE_DEVICE_NAME", ""),
+        )
     return "", ""
 
 
@@ -191,6 +214,7 @@ async def run(args: argparse.Namespace) -> int:
         "tilt": "DoorSensor",
         "leak": "LeakSensor",
         "lock": "Lock",
+        "button": "SmartRemoter",
     }
     expected_type = expected_type_map[kind]
 
@@ -274,6 +298,11 @@ async def run(args: argparse.Namespace) -> int:
             print(f"Watching device: {device.get('name')} ({device_id})")
             print(f"Initial motion state={baseline_motion}")
             print(f"Waiting up to {args.timeout}s for motion state change...")
+        elif kind == "button":
+            last_press = (current_state.get("state") or {}).get("event")
+            print(f"Watching device: {device.get('name')} ({device_id})")
+            print(f"Last press per getState (not a new press): {describe_press(last_press)}")
+            print(f"Waiting up to {args.timeout}s for a button press...")
         elif kind == "any":
             print(f"Watching device: {device.get('name')} ({device_id})")
             print(f"Device type: {device_type}")
@@ -300,6 +329,25 @@ async def run(args: argparse.Namespace) -> int:
                 return
 
             if event_device_id != device_id:
+                return
+
+            if kind == "button":
+                received_ms = time.time() * 1000
+                event_name = payload.get("event")
+                press = event_data.get("event")
+                hub_ms = payload.get("time")
+                if isinstance(hub_ms, (int, float)) and not isinstance(hub_ms, bool):
+                    # Positive: the hub stamped it before this machine got it.
+                    timing = f"local receipt - hub time = {(received_ms - hub_ms) / 1000:+.3f} s"
+                else:
+                    timing = "no hub time in payload"
+                if event_name != "SmartRemoter.StatusChange":
+                    print(f"NOT A PRESS: {event_name}: {describe_press(press)}; {timing}")
+                    return
+                print("PRESS DETECTED")
+                print(f"  {event_name}: {describe_press(press)}")
+                print(f"  {timing}")
+                loop.call_soon_threadsafe(done.set)
                 return
 
             old_state = dict(current_state)
@@ -397,7 +445,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--kind",
-        choices=("any", "th", "temp", "motion", "door", "tilt", "leak", "lock"),
+        choices=("any", "th", "temp", "motion", "door", "tilt", "leak", "lock", "button"),
         default=os.getenv("YOLINK_KIND", "th"),
     )
     parser.add_argument(

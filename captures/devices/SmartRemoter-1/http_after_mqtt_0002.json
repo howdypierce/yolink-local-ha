@@ -1,0 +1,59 @@
+{
+  "capture_kind": "post_mqtt",
+  "captured_at": "2026-11-22T22:51:38.122194+00:00",
+  "device_id": "SmartRemoter-1",
+  "device_name": "SmartRemoter-1",
+  "display_type": "SmartRemoter",
+  "env_name": "YOLINK_MYNEWDEV_SERIAL",
+  "mqtt_payload": {
+    "data": {
+      "battery": 4,
+      "beep": false,
+      "devTemperature": 15,
+      "event": {
+        "keyMask": 2,
+        "type": "Press"
+      },
+      "loraInfo": {
+        "devNetType": "A",
+        "gatewayId": "",
+        "gateways": 1,
+        "signal": 0
+      },
+      "version": "1404"
+    },
+    "deviceId": "SmartRemoter-1",
+    "event": "SmartRemoter.StatusChange",
+    "msgid": "1795387898180",
+    "time": 1795387898181
+  },
+  "raw_type": "SmartRemoter",
+  "request": {
+    "method": "SmartRemoter.getState",
+    "targetDevice": "SmartRemoter-1",
+    "token": "REDACTED"
+  },
+  "response": {
+    "code": "000000",
+    "data": {
+      "online": true,
+      "reportAt": "2026-11-22T22:51:38.164Z",
+      "state": {
+        "battery": 4,
+        "beep": false,
+        "devTemperature": 15,
+        "event": {
+          "keyMask": 2,
+          "type": "Press"
+        },
+        "loraP2PHash": 0,
+        "version": "1404"
+      }
+    },
+    "desc": "Success",
+    "method": "SmartRemoter.getState",
+    "msgid": 1795387898202,
+    "time": 1795387898202
+  },
+  "sequence": 2
+}

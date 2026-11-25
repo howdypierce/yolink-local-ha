@@ -4,6 +4,23 @@ from datetime import timedelta
 
 DOMAIN = "yolocal"
 EVENT_DATA_RECORD = f"{DOMAIN}_data_record"
+# Fired for SmartRemoter (FlexFob) button presses. The payload mirrors the
+# cloud YoLink integration's ``yolink_event`` so device triggers and event
+# automations carry over: ``device_id`` is the Home Assistant device registry id
+# and ``type`` is e.g. ``button_1_short_press``.
+EVENT_BUTTON = f"{DOMAIN}_event"
+
+# SmartRemoter press types, as named by the cloud integration's triggers.
+BUTTON_PRESS_TYPES = ("short_press", "long_press")
+# The Mini FlexFob has two buttons and the FlexFob four. A SmartRemoter whose
+# model is not listed is treated as having the FlexFob's four.
+SMART_REMOTER_DEFAULT_BUTTONS = 4
+SMART_REMOTER_BUTTONS_BY_MODEL = {
+    "YS3604-UC": 4,
+    "YS3604-EC": 4,
+    "YS3614-UC": 2,
+    "YS3614-EC": 2,
+}
 
 # Configuration keys
 CONF_HUB_IP = "hub_ip"
@@ -31,6 +48,7 @@ PLATFORMS: list[str] = [
     "siren",
     "valve",
     "button",
+    "event",
 ]
 
 # Garage door controllers only pulse their relay. They get a toggle button;

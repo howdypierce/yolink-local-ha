@@ -1,0 +1,32 @@
+{
+  "captured_at": "2026-11-22T22:51:49.975538+00:00",
+  "device_id": "SmartRemoter-1",
+  "device_name": "SmartRemoter-1",
+  "display_type": "SmartRemoter",
+  "env_name": "YOLINK_MYNEWDEV_SERIAL",
+  "mqtt_payload": {
+    "data": {
+      "battery": 4,
+      "beep": false,
+      "devTemperature": 15,
+      "event": {
+        "keyMask": 2,
+        "type": "LongPress"
+      },
+      "loraInfo": {
+        "devNetType": "A",
+        "gatewayId": "",
+        "gateways": 1,
+        "signal": 0
+      },
+      "version": "1404"
+    },
+    "deviceId": "SmartRemoter-1",
+    "event": "SmartRemoter.StatusChange",
+    "msgid": "1795387910056",
+    "time": 1795387910056
+  },
+  "raw_type": "SmartRemoter",
+  "sequence": 4,
+  "topic": "ylsubnet/REDACTED_NET_ID/SmartRemoter-1/report"
+}

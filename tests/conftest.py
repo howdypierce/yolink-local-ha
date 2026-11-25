@@ -33,6 +33,8 @@ def _install_homeassistant_stubs() -> None:
 
     core.HomeAssistant = HomeAssistant
     core.callback = callback
+    core.CALLBACK_TYPE = object
+    core.Event = object
 
     config_entries = ModuleType("homeassistant.config_entries")
     config_entries.ConfigFlowResult = dict
@@ -214,6 +216,12 @@ def _install_homeassistant_stubs() -> None:
         def async_get_device(self, identifiers=None, **_kwargs):
             return self.devices.get(frozenset(identifiers or set()))
 
+        def async_get(self, device_id):
+            for entry in self.devices.values():
+                if entry.id == device_id:
+                    return entry
+            return None
+
         def async_remove_device(self, device_id):
             for identifiers, entry in list(self.devices.items()):
                 if entry.id == device_id:
@@ -271,6 +279,13 @@ def _install_homeassistant_stubs() -> None:
 
     entity_registry.async_get = async_get_entity_registry
     entity_registry.async_entries_for_config_entry = async_entries_for_config_entry
+
+    trigger_helper = ModuleType("homeassistant.helpers.trigger")
+    trigger_helper.TriggerActionType = object
+    trigger_helper.TriggerInfo = dict
+
+    typing_helper = ModuleType("homeassistant.helpers.typing")
+    typing_helper.ConfigType = dict
 
     recorder_helper = ModuleType("homeassistant.helpers.recorder")
     recorder_helper.DATA_INSTANCE = "recorder_instance"
@@ -406,8 +421,68 @@ def _install_homeassistant_stubs() -> None:
     valve.ValveDeviceClass = ValveDeviceClass
     valve.ValveEntityFeature = ValveEntityFeature
 
+    event_component = ModuleType("homeassistant.components.event")
+
+    class EventEntity:
+        _attr_event_types: tuple[str, ...] = ()
+        last_event_type = None
+
+        def _trigger_event(self, event_type, event_attributes=None) -> None:
+            if event_type not in self._attr_event_types:
+                raise ValueError(event_type)
+            self.last_event_type = event_type
+
+        async def async_remove(self) -> None:
+            return None
+
+    class EventDeviceClass:
+        BUTTON = "button"
+        DOORBELL = "doorbell"
+
+    event_component.EventEntity = EventEntity
+    event_component.EventDeviceClass = EventDeviceClass
+
+    device_automation = ModuleType("homeassistant.components.device_automation")
+
+    class _TriggerSchema:
+        def __init__(self, schema=None) -> None:
+            self.schema = dict(schema or {})
+
+        def extend(self, schema):
+            return _TriggerSchema({**self.schema, **schema})
+
+    device_automation.DEVICE_TRIGGER_BASE_SCHEMA = _TriggerSchema()
+
+    ha_component = ModuleType("homeassistant.components.homeassistant")
+    ha_triggers = ModuleType("homeassistant.components.homeassistant.triggers")
+    event_trigger = ModuleType("homeassistant.components.homeassistant.triggers.event")
+    event_trigger.CONF_PLATFORM = "platform"
+    event_trigger.CONF_EVENT_TYPE = "event_type"
+    event_trigger.CONF_EVENT_DATA = "event_data"
+    event_trigger.attached = []
+
+    def event_trigger_schema(config):
+        return dict(config)
+
+    async def event_async_attach_trigger(
+        hass, config, action, trigger_info, *, platform_type="event"
+    ):
+        event_trigger.attached.append(
+            {"config": config, "action": action, "platform_type": platform_type}
+        )
+        return lambda: None
+
+    event_trigger.TRIGGER_SCHEMA = event_trigger_schema
+    event_trigger.async_attach_trigger = event_async_attach_trigger
+    ha_triggers.event = event_trigger
+    ha_component.triggers = ha_triggers
+
     const = ModuleType("homeassistant.const")
     const.PERCENTAGE = "%"
+    const.CONF_DEVICE_ID = "device_id"
+    const.CONF_DOMAIN = "domain"
+    const.CONF_PLATFORM = "platform"
+    const.CONF_TYPE = "type"
 
     class UnitOfTemperature:
         CELSIUS = "C"
@@ -441,6 +516,8 @@ def _install_homeassistant_stubs() -> None:
     sys.modules["homeassistant.helpers.device_registry"] = device_registry
     sys.modules["homeassistant.helpers.entity_registry"] = entity_registry
     sys.modules["homeassistant.helpers.recorder"] = recorder_helper
+    sys.modules["homeassistant.helpers.trigger"] = trigger_helper
+    sys.modules["homeassistant.helpers.typing"] = typing_helper
     sys.modules["homeassistant.helpers.storage"] = storage
     sys.modules["homeassistant.util"] = util
     sys.modules["homeassistant.util.dt"] = dt
@@ -450,6 +527,13 @@ def _install_homeassistant_stubs() -> None:
     sys.modules["homeassistant.components.switch"] = switch
     sys.modules["homeassistant.components.valve"] = valve
     sys.modules["homeassistant.components.button"] = button
+    sys.modules["homeassistant.components.event"] = event_component
+    sys.modules["homeassistant.components.device_automation"] = device_automation
+    sys.modules["homeassistant.components.homeassistant"] = ha_component
+    sys.modules["homeassistant.components.homeassistant.triggers"] = ha_triggers
+    sys.modules["homeassistant.components.homeassistant.triggers.event"] = (
+        event_trigger
+    )
     sys.modules["homeassistant.const"] = const
 
 
@@ -475,7 +559,12 @@ def _install_runtime_dependency_stubs() -> None:
         def __init__(self, schema) -> None:
             self.schema = schema
 
+    class In:
+        def __init__(self, container) -> None:
+            self.container = container
+
     voluptuous.Schema = Schema
+    voluptuous.In = In
     voluptuous.Required = _SchemaKey
     voluptuous.Optional = _SchemaKey
     sys.modules["voluptuous"] = voluptuous
